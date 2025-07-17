@@ -27,7 +27,7 @@ def style_app():
             }
 
             .stButton>button {
-                fontše: 18px !important;
+                font-size: 18px !important;
                 padding: 10px 20px;
                 border-radius: 10px;
                 border: none;
@@ -118,6 +118,8 @@ def parse_metadata(file_content, filetype, filename):
 # -------------------- S3 File Fetch --------------------
 def fetch_s3_file(access_key, secret_key, session_token, bucket_name, file_key):
     try:
+        if not bucket_name or not file_key:
+            raise ValueError("Bucket name or file key is empty")
         session = boto3.Session(
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
@@ -133,6 +135,8 @@ def fetch_s3_file(access_key, secret_key, session_token, bucket_name, file_key):
 # -------------------- S3 File List --------------------
 def list_s3_files(access_key, secret_key, session_token, bucket_name):
     try:
+        if not bucket_name:
+            raise ValueError("Bucket name is empty")
         session = boto3.Session(
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
@@ -210,7 +214,7 @@ def home_page():
             <h4>Key Benefits</h4>
             <ul>
                 <li>Connects cloud metadata with enterprise data</li>
-                <li>Automatically detects and matches identifiers</li>
+                <li>Automatically detects and matches unique identifiers</li>
                 <li>Visualizes matched vs unmatched records</li>
                 <li>Minimizes manual work and errors</li>
                 <li>Secure, no data stored or shared</li>
@@ -289,7 +293,7 @@ def upload_page():
         else:
             st.selectbox("Select Customer File", options=["No files available"], key="cust_file_key", disabled=True)
 
-    st.markdown("---")
+    st.markdown(" ")
 
     if st.button("Start Parsing & Matching", use_container_width=True):
         required_keys = ["aws_access_key", "aws_secret_key", "aws_session_token", "bucket_name", "file_key",
@@ -304,9 +308,23 @@ def upload_page():
 
 # -------------------- Results Page --------------------
 def results_page():
+    # Guard clause to prevent processing if page is not 'results'
+    if st.session_state.get("page") != "results":
+        st.session_state.page = "home"
+        st.rerun()
+        return
+
     style_app()
     show_header()
     st.markdown("### Results - Matched and Unmatched Records")
+
+    # Validate session state before S3 calls
+    required_keys = ["aws_access_key", "aws_secret_key", "aws_session_token", "bucket_name", "file_key",
+                     "cust_aws_access_key", "cust_aws_secret_key", "cust_aws_session_token", "cust_bucket_name", "cust_file_key"]
+    if not all(st.session_state.get(k) for k in required_keys) or st.session_state.get("file_key") == "No files available" or st.session_state.get("cust_file_key") == "No files available":
+        st.error("Invalid or missing session state. Returning to home page.")
+        reset_session()
+        return
 
     # Metadata S3
     file_content, filename = fetch_s3_file(
