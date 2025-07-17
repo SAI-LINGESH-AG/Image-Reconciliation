@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import mysql.connector
 import xml.etree.ElementTree as ET
 import boto3
 from io import StringIO, BytesIO
@@ -28,7 +27,7 @@ def style_app():
             }
 
             .stButton>button {
-                font-size: 18px !important;
+                fontše: 18px !important;
                 padding: 10px 20px;
                 border-radius: 10px;
                 border: none;
@@ -155,26 +154,6 @@ def detect_primary_key(df):
             return column
     return df.columns[0]
 
-# -------------------- Database Fetch --------------------
-def get_customer_data(host, port, user, password, database, table):
-    try:
-        conn = mysql.connector.connect(
-            host=host,
-            port=int(port),
-            user=user,
-            password=password,
-            database=database
-        )
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT * FROM {table}")
-        columns = [desc[0] for desc in cursor.description]
-        data = cursor.fetchall()
-        conn.close()
-        return pd.DataFrame(data, columns=columns)
-    except Exception as e:
-        st.error(f"Database Error: {e}")
-        return pd.DataFrame()
-
 # -------------------- Matcher --------------------
 def match_data(meta_df, cust_df, meta_key, cust_key):
     merged = pd.merge(meta_df, cust_df, left_on=meta_key, right_on=cust_key, how='outer', indicator=True)
@@ -245,9 +224,9 @@ def home_page():
             <h4>How It Works</h4>
             <ul>
                 <li>Click <strong>Get Started</strong></li>
-                <li>Enter your S3 credentials</li>
-                <li>Provide your database details</li>
-                <li>Choose the metadata file</li>
+                <li>Enter your S3 credentials for metadata</li>
+                <li>Enter your S3 credentials for customer data</li>
+                <li>Choose the metadata and customer files</li>
                 <li>Instantly view reconciliation results</li>
             </ul>
         </div>
@@ -262,9 +241,7 @@ def home_page():
 def upload_page():
     style_app()
     show_header()
-    st.markdown("### Upload Metadata & Enter Customer Info")
-
-    st.selectbox("Select Customer Data Source", ["MySQL", "S3"], key="customer_source")
+    st.markdown("### Upload Metadata & Customer Data")
 
     col1, col2 = st.columns(2)
 
@@ -290,48 +267,34 @@ def upload_page():
         else:
             st.selectbox("Select Metadata File", options=["No files available"], key="file_key", disabled=True)
 
-    # ----------- Column 2: Customer Data (MySQL or S3) -----------
+    # ----------- Column 2: Customer Data (S3) -----------
     with col2:
-        if st.session_state.customer_source == "MySQL":
-            st.subheader("Customer DB (MySQL)")
-            st.text_input("MySQL Host", value="localhost", key="host")
-            st.text_input("Port", value="3306", key="port")
-            st.text_input("Username", key="user")
-            st.text_input("Password", type="password", key="password")
-            st.text_input("Database Name", key="database")
-            st.text_input("Customer Table Name", key="table_name")
+        st.subheader("Customer Data (S3)")
+        st.text_input("Customer AWS Access Key ID", key="cust_aws_access_key")
+        st.text_input("Customer AWS Secret Access Key", type="password", key="cust_aws_secret_key")
+        st.text_input("Customer AWS Session Token", type="password", key="cust_aws_session_token")
+        st.text_input("Customer S3 Bucket Name", key="cust_bucket_name")
+
+        cust_file_options = []
+        if all(st.session_state.get(k) for k in ["cust_aws_access_key", "cust_aws_secret_key", "cust_aws_session_token", "cust_bucket_name"]):
+            cust_file_options = list_s3_files(
+                st.session_state.cust_aws_access_key,
+                st.session_state.cust_aws_secret_key,
+                st.session_state.cust_aws_session_token,
+                st.session_state.cust_bucket_name
+            )
+
+        if cust_file_options:
+            st.selectbox("Select Customer File", options=cust_file_options, key="cust_file_key")
         else:
-            st.subheader("Customer Data (S3)")
-            st.text_input("Customer AWS Access Key ID", key="cust_aws_access_key")
-            st.text_input("Customer AWS Secret Access Key", type="password", key="cust_aws_secret_key")
-            st.text_input("Customer AWS Session Token", type="password", key="cust_aws_session_token")
-            st.text_input("Customer S3 Bucket Name", key="cust_bucket_name")
-
-            cust_file_options = []
-            if all(st.session_state.get(k) for k in ["cust_aws_access_key", "cust_aws_secret_key", "cust_aws_session_token", "cust_bucket_name"]):
-                cust_file_options = list_s3_files(
-                    st.session_state.cust_aws_access_key,
-                    st.session_state.cust_aws_secret_key,
-                    st.session_state.cust_aws_session_token,
-                    st.session_state.cust_bucket_name
-                )
-
-            if cust_file_options:
-                st.selectbox("Select Customer File", options=cust_file_options, key="cust_file_key")
-            else:
-                st.selectbox("Select Customer File", options=["No files available"], key="cust_file_key", disabled=True)
+            st.selectbox("Select Customer File", options=["No files available"], key="cust_file_key", disabled=True)
 
     st.markdown("---")
 
     if st.button("Start Parsing & Matching", use_container_width=True):
-        if st.session_state.customer_source == "MySQL":
-            required_keys = ["aws_access_key", "aws_secret_key", "aws_session_token", "bucket_name", "file_key",
-                             "host", "port", "user", "password", "database", "table_name"]
-        else:
-            required_keys = ["aws_access_key", "aws_secret_key", "aws_session_token", "bucket_name", "file_key",
-                             "cust_aws_access_key", "cust_aws_secret_key", "cust_aws_session_token", "cust_bucket_name", "cust_file_key"]
-
-        if all(st.session_state.get(k) for k in required_keys) and st.session_state.get("file_key") != "No files available":
+        required_keys = ["aws_access_key", "aws_secret_key", "aws_session_token", "bucket_name", "file_key",
+                         "cust_aws_access_key", "cust_aws_secret_key", "cust_aws_session_token", "cust_bucket_name", "cust_file_key"]
+        if all(st.session_state.get(k) for k in required_keys) and st.session_state.get("file_key") != "No files available" and st.session_state.get("cust_file_key") != "No files available":
             st.session_state.page = "results"
         else:
             st.error("Please complete all fields and select valid files.")
@@ -357,27 +320,16 @@ def results_page():
     filetype = filename.split(".")[-1].upper() if filename else None
     metadata_df = parse_metadata(file_content, filetype, filename) if file_content and filetype else pd.DataFrame()
 
-    # Customer Data
-    customer_df = pd.DataFrame()
-    if st.session_state.customer_source == "MySQL":
-        customer_df = get_customer_data(
-            st.session_state.host,
-            st.session_state.port,
-            st.session_state.user,
-            st.session_state.password,
-            st.session_state.database,
-            st.session_state.table_name
-        )
-    else:
-        cust_file_content, cust_filename = fetch_s3_file(
-            st.session_state.cust_aws_access_key,
-            st.session_state.cust_aws_secret_key,
-            st.session_state.cust_aws_session_token,
-            st.session_state.cust_bucket_name,
-            st.session_state.cust_file_key
-        )
-        cust_filetype = cust_filename.split(".")[-1].upper() if cust_filename else None
-        customer_df = parse_metadata(cust_file_content, cust_filetype, cust_filename) if cust_file_content else pd.DataFrame()
+    # Customer Data (S3)
+    cust_file_content, cust_filename = fetch_s3_file(
+        st.session_state.cust_aws_access_key,
+        st.session_state.cust_aws_secret_key,
+        st.session_state.cust_aws_session_token,
+        st.session_state.cust_bucket_name,
+        st.session_state.cust_file_key
+    )
+    cust_filetype = cust_filename.split(".")[-1].upper() if cust_filename else None
+    customer_df = parse_metadata(cust_file_content, cust_filetype, cust_filename) if cust_file_content else pd.DataFrame()
 
     if not metadata_df.empty and not customer_df.empty:
         meta_key = detect_primary_key(metadata_df)
@@ -425,18 +377,11 @@ def main():
     # ---------- Initialize Required Session Keys ----------
     default_keys = {
         "page": "home",
-        "customer_source": "MySQL",
         "aws_access_key": "",
         "aws_secret_key": "",
         "aws_session_token": "",
         "bucket_name": "",
         "file_key": "",
-        "host": "localhost",
-        "port": "3306",
-        "user": "",
-        "password": "",
-        "database": "",
-        "table_name": "",
         "cust_aws_access_key": "",
         "cust_aws_secret_key": "",
         "cust_aws_session_token": "",
